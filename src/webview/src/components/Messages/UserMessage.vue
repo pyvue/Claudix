@@ -17,7 +17,19 @@
           @keydown.space.prevent="startEditing"
         >
           <div class="message-text">
-            <div>{{ displayContent }}</div>
+            <div class="message-blocks">
+              <template v-if="typeof props.message.message.content === 'string'">
+                <ContentBlock :block="{ type: 'text', text: props.message.message.content }" :context="props.context" />
+              </template>
+              <template v-else>
+                <ContentBlock
+                  v-for="(wrapper, index) in props.message.message.content"
+                  :key="index"
+                  :block="wrapper.content"
+                  :context="props.context"
+                />
+              </template>
+            </div>
             <button
               class="restore-button"
               @click.stop="handleRestore"
@@ -34,6 +46,9 @@
             :show-progress="false"
             :conversation-working="false"
             :attachments="attachments"
+            :has-selection="!!editingSelection"
+            :selection-preview="editingSelection"
+            :selection-include-signal="selectionIncludeSignal"
             ref="chatInputRef"
             @submit="handleSaveEdit"
             @stop="cancelEdit"
@@ -51,7 +66,9 @@ import type { Message } from '../../models/Message';
 import type { ToolContext } from '../../types/tool';
 import type { AttachmentItem } from '../../types/attachment';
 import ChatInputBox from '../ChatInputBox.vue';
-import FileIcon from '../FileIcon.vue';
+import ContentBlock from './ContentBlock.vue';
+import type { SelectionBlock } from '../../models/ContentBlock';
+import type { SelectionRange } from '../../core/Session';
 
 interface Props {
   message: Message;
@@ -64,6 +81,8 @@ const isEditing = ref(false);
 const chatInputRef = ref<InstanceType<typeof ChatInputBox>>();
 const containerRef = ref<HTMLElement>();
 const attachments = ref<AttachmentItem[]>([]);
+const editingSelection = ref<SelectionRange | null>(null);
+const selectionIncludeSignal = ref(0);
 
 // 显示内容（纯文本）
 const displayContent = computed(() => {
@@ -125,16 +144,75 @@ function extractAttachments(): AttachmentItem[] {
   return extracted;
 }
 
+function extractSelectionBlock(): SelectionRange | null {
+  const content = props.message.message.content;
+  if (!Array.isArray(content)) {
+    return null;
+  }
+
+  for (const wrapper of content) {
+    const block = wrapper.content as SelectionBlock;
+    if (block?.type === 'selection') {
+      return {
+        filePath: block.filePath,
+        startLine: block.startLine ?? 0,
+        endLine: block.endLine ?? block.startLine ?? 0,
+        selectedText: block.selectedText,
+      };
+    }
+  }
+
+  return null;
+}
+
+function buildEditableContent(): string {
+  const content = props.message.message.content;
+  if (typeof content === 'string') {
+    return content;
+  }
+
+  if (!Array.isArray(content)) {
+    return displayContent.value || '';
+  }
+
+  const segments: string[] = [];
+
+  for (const wrapper of content) {
+    const block = wrapper.content as SelectionBlock;
+    if (block?.type === 'text') {
+      if (block.text?.trim()) {
+        segments.push(block.text);
+      }
+    } else if (block?.type === 'selection') {
+      const filePath = block.filePath;
+      const lineLabel =
+        block.startLine && block.endLine
+          ? `行 ${block.startLine}-${block.endLine}`
+          : block.startLine
+            ? `行 ${block.startLine}`
+            : '';
+      const header = `[引用: ${filePath}${lineLabel ? ` ${lineLabel}` : ''}]`;
+      segments.push(header);
+    }
+  }
+
+  return segments.join('\n\n');
+}
+
 async function startEditing() {
   isEditing.value = true;
 
   // 提取附件
   attachments.value = extractAttachments();
+  editingSelection.value = extractSelectionBlock();
+  if (editingSelection.value) {
+    selectionIncludeSignal.value += 1;
+  }
 
   // 等待 DOM 更新后设置输入框内容和焦点
   await nextTick();
   if (chatInputRef.value) {
-    chatInputRef.value.setContent?.(displayContent.value || '');
+    chatInputRef.value.setContent?.(buildEditableContent());
     chatInputRef.value.focus?.();
   }
 }
@@ -146,6 +224,7 @@ function handleRemoveAttachment(id: string) {
 function cancelEdit() {
   isEditing.value = false;
   attachments.value = []; // 清空附件列表
+  editingSelection.value = null;
 }
 
 function handleSaveEdit(content?: string) {
@@ -262,6 +341,19 @@ onUnmounted(() => {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+}
+
+.message-blocks {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.message-blocks :deep(.selection-snippet) {
+  display: none;
 }
 
 .message-view .message-text:hover {

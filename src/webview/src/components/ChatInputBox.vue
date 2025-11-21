@@ -1001,11 +1001,12 @@ defineExpose({
   padding: 8px;
   background: color-mix(in srgb, var(--vscode-editor-background) 40%, transparent);
   border-radius: 4px;
-  font-size: 12px;
-  max-height: 160px;
+  font-size: 11px;
+  max-height: 120px;
   overflow: auto;
   white-space: pre-wrap;
-  line-height: 1.4;
+  line-height: 1.35;
+  display: none;
 }
 
 .attachment-size {

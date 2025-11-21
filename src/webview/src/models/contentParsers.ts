@@ -167,7 +167,7 @@ function createToolResultBlock(raw: any): ToolResultBlock {
 }
 
 function parseSelection(text: string): SelectionBlock | undefined {
-  const fileMatch = text.match(/from ([^:]+):/);
+  const fileMatch = text.match(/from ([^\n]+):/);
   if (!fileMatch) {
     return undefined;
   }
@@ -195,7 +195,7 @@ function parseSelection(text: string): SelectionBlock | undefined {
         ? `${fileName}#${startLine}`
         : fileName;
 
-  const snippetMatch = text.match(/from [^:]+:\s*([\s\S]*?)\n+\s*This may or may not be related/);
+  const snippetMatch = text.match(/from [^\n]+:\s*([\s\S]*?)\n+\s*This may or may not be related/);
   const selectedText = snippetMatch ? snippetMatch[1].replace(/\s*$/, '') : undefined;
 
   return {
