@@ -67,6 +67,9 @@
             :thinking-level="session?.thinkingLevel.value"
             :permission-mode="session?.permissionMode.value"
             :selected-model="session?.modelSelection.value"
+            :has-selection="hasSelection"
+            :selection-include-signal="selectionIncludeSignal"
+            :selection-preview="session?.selection.value"
             @submit="handleSubmit"
             @stop="handleStop"
             @add-attachment="handleAddAttachment"
@@ -142,6 +145,11 @@
   const permissionRequestsLen = computed(() => permissionRequests.value.length);
   const pendingPermission = computed(() => permissionRequests.value[0] as any);
   const platform = computed(() => runtime.appContext.platform);
+  const hasSelection = computed(() => {
+    const selection = session.value?.selection.value;
+    if (!selection) return false;
+    return typeof selection.selectedText === 'string' && selection.selectedText.length > 0;
+  });
 
   // 注册命令：permissionMode.toggle（在下方定义函数后再注册）
 
@@ -167,6 +175,7 @@
 
   // 附件状态管理
   const attachments = ref<AttachmentItem[]>([]);
+  const selectionIncludeSignal = ref(0);
 
   // 记录上次消息数量，用于判断是否需要滚动
   let prevCount = 0;
@@ -216,6 +225,14 @@
     scrollToBottom();
   });
 
+  watch(
+    () => session.value?.selection.value,
+    (selection) => {
+      if (!selection?.autoInclude) return;
+      selectionIncludeSignal.value += 1;
+    }
+  );
+
   onMounted(async () => {
     prevCount = messages.value.length;
     await nextTick();
@@ -246,14 +263,16 @@
   }
 
   // ChatInput 事件处理
-  async function handleSubmit(content: string) {
+  async function handleSubmit(content: string, options?: { includeSelection?: boolean }) {
     const s = session.value;
     const trimmed = (content || '').trim();
-    if (!s || (!trimmed && attachments.value.length === 0) || isBusy.value) return;
+    const includeSelection = !!options?.includeSelection;
+    const hasAttachments = attachments.value.length > 0;
+    if (!s || (!trimmed && !hasAttachments && !includeSelection) || isBusy.value) return;
 
     try {
       // 传递附件给 send 方法
-      await s.send(trimmed || ' ', attachments.value);
+      await s.send(trimmed || ' ', attachments.value, includeSelection);
 
       // 发送成功后清空附件
       attachments.value = [];

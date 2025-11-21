@@ -12,6 +12,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { createDecorator } from '../di/instantiation';
 import { ILogService } from './logService';
+import { selectionState } from './selectionState';
 
 export const IWebViewService = createDecorator<IWebViewService>('webViewService');
 
@@ -58,7 +59,10 @@ export class WebViewService implements IWebViewService {
 	readonly _serviceBrand: undefined;
 
 	private readonly webviews = new Set<vscode.Webview>();
+	private readonly readyWebviews = new Set<vscode.Webview>();
 	private readonly webviewConfigs = new Map<vscode.Webview, WebviewBootstrapConfig>();
+	private readonly pendingMessages: Array<{ type: string; message: any }> = [];
+	private static readonly MAX_PENDING_MESSAGES = 50;
 	private messageHandler?: (message: any) => void;
 	private readonly editorPanels = new Map<string, vscode.WebviewPanel>();
 
@@ -85,6 +89,9 @@ export class WebViewService implements IWebViewService {
 		// WebviewView 的销毁由 VSCode 管理，这里仅作日志记录
 		webviewView.onDidDispose(
 			() => {
+				this.webviews.delete(webviewView.webview);
+				this.readyWebviews.delete(webviewView.webview);
+				this.webviewConfigs.delete(webviewView.webview);
 				this.logService.info('侧边栏 WebView 视图已销毁');
 			},
 			undefined,
@@ -112,7 +119,8 @@ export class WebViewService implements IWebViewService {
 		// 目前 ClaudeAgentService 只需要与侧边栏聊天视图通信
 		// 因此这里只向 host === 'sidebar' 且 page === 'chat' 的 WebView 发送消息
 		if (this.webviews.size === 0) {
-			this.logService.warn('[WebViewService] 当前没有可用的 WebView 实例，消息将被丢弃');
+			this.logService.warn('[WebViewService] 当前没有可用的 WebView 实例，消息暂存待发送');
+			this.enqueuePendingMessage(message);
 			return;
 		}
 
@@ -123,22 +131,35 @@ export class WebViewService implements IWebViewService {
 
 		const toRemove: vscode.Webview[] = [];
 
+		let delivered = false;
+
 		for (const webview of this.webviews) {
+			if (!this.readyWebviews.has(webview)) {
+				continue;
+			}
 			const config = this.webviewConfigs.get(webview);
 			if (!config || config.host !== 'sidebar' || (config.page && config.page !== 'chat')) {
 				continue;
 			}
 
-			try {
-				webview.postMessage(payload);
-			} catch (error) {
-				this.logService.warn('[WebViewService] 向 WebView 发送消息失败，将移除该实例', error as Error);
-				toRemove.push(webview);
+				try {
+					webview.postMessage(payload);
+					delivered = true;
+					this.handleAutoIncludeDelivered(payload);
+				} catch (error) {
+					this.logService.warn('[WebViewService] 向 WebView 发送消息失败，将移除该实例', error as Error);
+					toRemove.push(webview);
+				}
 			}
+
+		if (!delivered) {
+			this.logService.info('[WebViewService] 暂无 ready WebView，将缓存消息');
+			this.enqueuePendingMessage(message);
 		}
 
 		for (const webview of toRemove) {
 			this.webviews.delete(webview);
+			this.readyWebviews.delete(webview);
 			this.webviewConfigs.delete(webview);
 		}
 	}
@@ -196,6 +217,7 @@ export class WebViewService implements IWebViewService {
 		panel.onDidDispose(
 			() => {
 				this.webviews.delete(panel.webview);
+				this.readyWebviews.delete(panel.webview);
 				this.webviewConfigs.delete(panel.webview);
 				this.editorPanels.delete(key);
 				this.logService.info(`[WebViewService] 主编辑器 WebView 面板已销毁: page=${page}, id=${key}`);
@@ -227,6 +249,7 @@ export class WebViewService implements IWebViewService {
 		// 连接消息处理器
 		webview.onDidReceiveMessage(
 			message => {
+				this.markWebviewReady(webview);
 				this.logService.info(`[WebView → Extension] 收到消息: ${message.type}`);
 				if (this.messageHandler) {
 					this.messageHandler(message);
@@ -238,6 +261,58 @@ export class WebViewService implements IWebViewService {
 
 		// 设置 WebView HTML（根据开发/生产模式切换）
 		webview.html = this.getHtmlForWebview(webview, bootstrap);
+	}
+
+	private enqueuePendingMessage(message: any): void {
+		this.pendingMessages.push({
+			type: 'from-extension',
+			message
+		});
+		if (this.pendingMessages.length > WebViewService.MAX_PENDING_MESSAGES) {
+			this.pendingMessages.shift();
+		}
+	}
+
+	private flushPendingMessages(): void {
+		if (this.readyWebviews.size === 0 || this.pendingMessages.length === 0) {
+			return;
+		}
+
+		for (const webview of this.readyWebviews) {
+			const config = this.webviewConfigs.get(webview);
+			if (!config || config.host !== 'sidebar' || (config.page && config.page !== 'chat')) {
+				continue;
+			}
+				for (const payload of this.pendingMessages) {
+					try {
+						webview.postMessage(payload);
+						this.handleAutoIncludeDelivered(payload);
+					} catch (error) {
+						this.logService.warn('[WebViewService] 推送缓存消息失败，将移除该实例', error as Error);
+						this.webviews.delete(webview);
+						this.readyWebviews.delete(webview);
+						this.webviewConfigs.delete(webview);
+					break;
+				}
+			}
+		}
+
+		this.pendingMessages.length = 0;
+	}
+
+	private markWebviewReady(webview: vscode.Webview): void {
+		if (this.readyWebviews.has(webview)) {
+			return;
+		}
+		this.readyWebviews.add(webview);
+		this.flushPendingMessages();
+	}
+
+	private handleAutoIncludeDelivered(payload: { message: any }): void {
+		const request = payload?.message?.request;
+		if (request && request.type === 'selection_changed' && request.selection?.autoInclude) {
+			selectionState.clearAutoInclude();
+		}
 	}
 
 	/**

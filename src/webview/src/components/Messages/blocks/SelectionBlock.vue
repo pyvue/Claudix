@@ -1,7 +1,10 @@
 <template>
   <div class="selection-block" @click="handleClick">
-    <span class="selection-icon">📝</span>
-    <span class="selection-label">{{ block.label }}</span>
+    <div class="selection-header">
+      <span class="selection-icon">📝</span>
+      <span class="selection-label">{{ block.label }}</span>
+    </div>
+    <pre v-if="block.selectedText" class="selection-snippet"><code>{{ block.selectedText }}</code></pre>
   </div>
 </template>
 
@@ -28,11 +31,11 @@ function handleClick() {
 
 <style scoped>
 .selection-block {
-  display: inline-flex;
-  align-items: center;
+  display: flex;
+  flex-direction: column;
   gap: 6px;
-  margin: 4px 0;
-  padding: 6px 10px;
+  margin: 6px 0;
+  padding: 8px 10px;
   background-color: var(--vscode-editor-background);
   border: 1px solid var(--vscode-panel-border);
   border-radius: 4px;
@@ -45,6 +48,12 @@ function handleClick() {
   border-color: var(--vscode-focusBorder);
 }
 
+.selection-header {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .selection-icon {
   font-size: 12px;
 }
@@ -53,5 +62,18 @@ function handleClick() {
   font-size: 12px;
   color: var(--vscode-textLink-foreground);
   font-family: var(--vscode-editor-font-family);
+}
+
+.selection-snippet {
+  margin: 0;
+  padding: 8px;
+  background: color-mix(in srgb, var(--vscode-editor-background) 60%, var(--vscode-editor-foreground) 5%);
+  border-radius: 4px;
+  border: 1px dashed var(--vscode-editorInlayHint-foreground);
+  font-family: var(--vscode-editor-font-family);
+  font-size: 12px;
+  white-space: pre-wrap;
+  line-height: 1.4;
+  color: var(--vscode-editor-foreground);
 }
 </style>

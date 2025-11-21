@@ -2,7 +2,7 @@
   "name": "claudix-vscode",
   "displayName": "Claudix - Claude Code for VSCode",
   "description": "Claude Code for VSCode. Bring the power of Claude AI assistant directly into your coding environment.",
-  "version": "0.3.9",
+  "version": "0.4.0",
   "publisher": "Haleclipse",
   "engines": {
     "vscode": "^1.98.0",
@@ -77,8 +77,20 @@
       {
         "command": "claudix.openSettings",
         "title": "Claudix: Open Settings"
+      },
+      {
+        "command": "claudix.addSelectionToChat",
+        "title": "Claudix: 发送选区到聊天"
       }
-    ]
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "claudix.addSelectionToChat",
+          "when": "editorHasSelection"
+        }
+      ]
+    }
   },
   "scripts": {
     "dev": "concurrently \"pnpm run dev:webview\" \"pnpm run watch:extension\"",

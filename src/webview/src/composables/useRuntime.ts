@@ -48,6 +48,7 @@ export function useRuntime(): RuntimeInstance {
 
   selectionEvents.add((selection) => {
     appContext.currentSelection(selection);
+    currentSelectionSignal(selection);
   });
 
   // SessionStore 内部的 effect 会自动监听 connection 建立并拉取会话列表
@@ -129,4 +130,3 @@ export function useRuntime(): RuntimeInstance {
 
   return { connectionManager, appContext, sessionStore, atMentionEvents, selectionEvents };
 }
-

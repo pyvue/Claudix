@@ -46,6 +46,7 @@ export interface SelectionBlock {
   label: string;
   startLine?: number;
   endLine?: number;
+  selectedText?: string;
 }
 
 export interface OpenedFileBlock {

@@ -15,6 +15,7 @@ export interface SelectionRange {
   startColumn?: number;
   endColumn?: number;
   selectedText?: string;
+  autoInclude?: boolean;
 }
 
 export interface UsageData {
@@ -210,9 +211,31 @@ export class Session {
     const shouldIncludeSelection = includeSelection && !isSlash;
     let selectionPayload: SelectionRange | undefined;
 
-    if (shouldIncludeSelection && !this.isSameSelection(this.lastSentSelection, this.selection())) {
-      selectionPayload = this.selection();
-      this.lastSentSelection = selectionPayload;
+    if (shouldIncludeSelection) {
+      const currentSelection = this.selection();
+      if (currentSelection) {
+        const forceInclude = currentSelection.autoInclude === true;
+        const sanitizedSelection: SelectionRange = {
+          filePath: currentSelection.filePath,
+          startLine: currentSelection.startLine,
+          endLine: currentSelection.endLine,
+          startColumn: currentSelection.startColumn,
+          endColumn: currentSelection.endColumn,
+          selectedText: currentSelection.selectedText
+        };
+
+        if (forceInclude || !this.isSameSelection(this.lastSentSelection, sanitizedSelection)) {
+          selectionPayload = sanitizedSelection;
+          this.lastSentSelection = sanitizedSelection;
+        }
+
+        if (currentSelection.autoInclude) {
+          this.selection({
+            ...sanitizedSelection,
+            autoInclude: false
+          });
+        }
+      }
     }
 
     const userMessage = this.buildUserMessage(input, attachments, selectionPayload);

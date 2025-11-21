@@ -119,6 +119,19 @@
           </template>
         </DropdownTrigger>
 
+        <!-- Selection Button -->
+        <button
+          class="action-button selection-button"
+          :class="{ 'selection-active': selectionIncluded }"
+          :disabled="!selectionAvailable"
+          :aria-pressed="selectionIncluded"
+          :title="selectionTooltip"
+          aria-label="Include Selection"
+          @click="handleSelectionButtonClick"
+        >
+          <span class="codicon codicon-selection text-[16px]!" />
+        </button>
+
         <!-- Sparkle Button -->
         <button
           class="action-button"
@@ -189,6 +202,8 @@ interface Props {
   progressPercentage?: number
   thinkingLevel?: string
   permissionMode?: PermissionMode
+  selectionAvailable?: boolean
+  selectionIncluded?: boolean
 }
 
 interface Emits {
@@ -201,6 +216,7 @@ interface Emits {
   (e: 'sparkle'): void
   (e: 'modeSelect', mode: PermissionMode): void
   (e: 'modelSelect', modelId: string): void
+  (e: 'toggleSelection'): void
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -212,7 +228,9 @@ const props = withDefaults(defineProps<Props>(), {
   showProgress: true,
   progressPercentage: 48.7,
   thinkingLevel: 'default_on',
-  permissionMode: 'default'
+  permissionMode: 'default',
+  selectionAvailable: false,
+  selectionIncluded: false
 })
 
 const emit = defineEmits<Emits>()
@@ -220,6 +238,16 @@ const emit = defineEmits<Emits>()
 const fileInputRef = ref<HTMLInputElement>()
 const commandDropdownRef = ref<InstanceType<typeof DropdownTrigger>>()
 const mentionDropdownRef = ref<InstanceType<typeof DropdownTrigger>>()
+const selectionAvailable = computed(() => !!props.selectionAvailable)
+const selectionIncluded = computed(() => !!props.selectionIncluded)
+const selectionTooltip = computed(() => {
+  if (!selectionAvailable.value) {
+    return '当前没有可发送的选区'
+  }
+  return selectionIncluded.value
+    ? '发送时包含当前选区（再次点击取消）'
+    : '点击后发送时附带当前选区'
+})
 
 // 获取 runtime 以访问 CommandRegistry
 const runtime = inject(RuntimeKey)
@@ -323,6 +351,11 @@ function handleThinkingToggle() {
 
 function handleSparkleClick() {
   emit('sparkle')
+}
+
+function handleSelectionButtonClick() {
+  if (!selectionAvailable.value) return
+  emit('toggleSelection')
 }
 
 function handleAttachClick() {
@@ -469,6 +502,12 @@ function handleMentionKeydown(event: KeyboardEvent) {
 
 /* 激活状态下的 hover 可以保持 */
 .action-button.think-button.thinking-active:hover {
+  opacity: 1;
+}
+
+.action-button.selection-button.selection-active {
+  color: var(--vscode-textLink-foreground);
+  background-color: color-mix(in srgb, var(--vscode-textLink-foreground) 20%, transparent);
   opacity: 1;
 }
 

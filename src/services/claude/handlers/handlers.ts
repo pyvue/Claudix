@@ -22,6 +22,7 @@ import type {
     OpenFileRequest,
     OpenFileResponse,
     GetCurrentSelectionResponse,
+    SelectionRange,
     ShowNotificationRequest,
     ShowNotificationResponse,
     NewConversationTabRequest,
@@ -58,6 +59,7 @@ import type {
 import type { HandlerContext } from './types';
 import type { PermissionMode, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import { AsyncStream } from '../transport/AsyncStream';
+import { selectionState } from '../../selectionState';
 /**
  * 初始化请求
  */
@@ -195,7 +197,15 @@ export async function handleGetCurrentSelection(
     context: HandlerContext
 ): Promise<GetCurrentSelectionResponse> {
     const editor = vscode.window.activeTextEditor;
-    if (!editor || editor.selection.isEmpty || editor.document.uri.scheme !== "file") {
+    if (!editor || editor.document.uri.scheme !== "file") {
+        return {
+            type: "get_current_selection_response",
+            selection: selectionState.consume()
+        };
+    }
+
+    if (editor.selection.isEmpty) {
+        selectionState.set(null);
         return {
             type: "get_current_selection_response",
             selection: null
@@ -204,17 +214,18 @@ export async function handleGetCurrentSelection(
 
     const document = editor.document;
     const selection = editor.selection;
-
+    const snapshot: SelectionRange = {
+        filePath: document.uri.fsPath,
+        startLine: selection.start.line + 1,
+        endLine: selection.end.line + 1,
+        startColumn: selection.start.character,
+        endColumn: selection.end.character,
+        selectedText: document.getText(selection)
+    };
+    selectionState.set(snapshot);
     return {
         type: "get_current_selection_response",
-        selection: {
-            filePath: document.uri.fsPath,
-            startLine: selection.start.line + 1,
-            endLine: selection.end.line + 1,
-            startColumn: selection.start.character,
-            endColumn: selection.end.character,
-            selectedText: document.getText(selection)
-        }
+        selection: snapshot
     };
 }
 

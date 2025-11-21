@@ -24,6 +24,27 @@
       </div>
     </div>
 
+    <!-- 选区预览 -->
+    <div
+      v-if="selectionPreviewBlock"
+      class="selection-preview"
+    >
+      <div class="selection-preview__header">
+        <span class="codicon codicon-selection" />
+        <span class="selection-preview__label">{{ selectionPreviewBlock.label }}</span>
+        <button class="selection-preview__close" title="移除选区" @click.stop="handleToggleSelection">
+          <span class="codicon codicon-close" />
+        </button>
+      </div>
+      <div class="selection-preview__meta">
+        <span class="selection-preview__path">{{ selectionPreviewBlock.path }}</span>
+        <span class="selection-preview__line">
+          {{ selectionPreviewBlock.lineLabel }}
+        </span>
+      </div>
+      <pre class="selection-preview__snippet"><code>{{ selectionPreviewBlock.snippet }}</code></pre>
+    </div>
+
     <!-- 第一行：输入框区域 -->
     <div
       ref="textareaRef"
@@ -44,15 +65,18 @@
       :loading="isLoading"
       :selected-model="selectedModel"
       :conversation-working="conversationWorking"
-      :has-input-content="!!content.trim()"
+      :has-input-content="hasSendableInput"
       :show-progress="showProgress"
       :progress-percentage="progressPercentage"
       :thinking-level="thinkingLevel"
       :permission-mode="permissionMode"
+      :selection-available="props.hasSelection"
+      :selection-included="includeSelection"
       @submit="handleSubmit"
       @stop="handleStop"
       @add-attachment="handleAddFiles"
       @mention="handleMention"
+      @toggle-selection="handleToggleSelection"
       @thinking-toggle="() => emit('thinkingToggle')"
       @mode-select="(mode) => emit('modeSelect', mode)"
       @model-select="(modelId) => emit('modelSelect', modelId)"
@@ -136,7 +160,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, nextTick, inject, onMounted, onUnmounted } from 'vue'
+import { ref, computed, nextTick, inject, onMounted, onUnmounted, watch } from 'vue'
 import type { PermissionMode } from '@anthropic-ai/claude-agent-sdk'
 import FileIcon from './FileIcon.vue'
 import ButtonArea from './ButtonArea.vue'
@@ -146,6 +170,7 @@ import { RuntimeKey } from '../composables/runtimeContext'
 import { useCompletionDropdown } from '../composables/useCompletionDropdown'
 import { getSlashCommands, commandToDropdownItem } from '../providers/slashCommandProvider'
 import { getFileReferences, fileToDropdownItem } from '../providers/fileReferenceProvider'
+import type { SelectionRange } from '../core/Session'
 
 interface Props {
   showProgress?: boolean
@@ -158,11 +183,14 @@ interface Props {
   attachments?: AttachmentItem[]
   thinkingLevel?: string
   permissionMode?: PermissionMode
+  hasSelection?: boolean
+  selectionIncludeSignal?: number
+  selectionPreview?: SelectionRange | null
 }
 
 interface Emits {
-  (e: 'submit', content: string): void
-  (e: 'queueMessage', content: string): void
+  (e: 'submit', content: string, options?: { includeSelection?: boolean }): void
+  (e: 'queueMessage', content: string, options?: { includeSelection?: boolean }): void
   (e: 'stop'): void
   (e: 'input', content: string): void
   (e: 'attach'): void
@@ -183,7 +211,10 @@ const props = withDefaults(defineProps<Props>(), {
   conversationWorking: false,
   attachments: () => [],
   thinkingLevel: 'default_on',
-  permissionMode: 'default'
+  permissionMode: 'default',
+  hasSelection: false,
+  selectionIncludeSignal: 0,
+  selectionPreview: null
 })
 
 const emit = defineEmits<Emits>()
@@ -193,9 +224,37 @@ const runtime = inject(RuntimeKey)
 const content = ref('')
 const isLoading = ref(false)
 const textareaRef = ref<HTMLDivElement | null>(null)
+const includeSelection = ref(false)
+
+const hasSendableInput = computed(() => {
+  const hasText = !!content.value.trim()
+  const hasAttachments = Array.isArray(props.attachments) && props.attachments.length > 0
+  return hasText || hasAttachments || includeSelection.value
+})
 
 const isSubmitDisabled = computed(() => {
-  return !content.value.trim() || isLoading.value
+  return !hasSendableInput.value || isLoading.value
+})
+
+const selectionPreviewBlock = computed(() => {
+  if (!includeSelection.value) return null
+  const preview = props.selectionPreview
+  if (!preview) return null
+  const filePath = preview.filePath
+  const fileName = filePath.split(/[/\\]/).pop() || filePath
+  const lineLabel = preview.startLine && preview.endLine
+    ? `L${preview.startLine}${typeof preview.startColumn === 'number' ? `:${preview.startColumn}` : ''}` +
+      ` - L${preview.endLine}${typeof preview.endColumn === 'number' ? `:${preview.endColumn}` : ''}`
+    : '选区'
+  const label = `${fileName}`
+  const snippet = (preview.selectedText || '').trim()
+  const truncated = snippet.length > 600 ? `${snippet.slice(0, 600)}…` : snippet
+  return {
+    label,
+    path: filePath,
+    lineLabel,
+    snippet: truncated || '[空选区]'
+  }
 })
 
 // === 使用新的 Completion Dropdown Composable ===
@@ -646,15 +705,20 @@ async function handleDrop(event: DragEvent) {
 }
 
 function handleSubmit() {
-  if (!content.value.trim()) return
+  const hasText = !!content.value.trim()
+  const hasAttachments = Array.isArray(props.attachments) && props.attachments.length > 0
+  if (!hasText && !hasAttachments && !includeSelection.value) return
 
+  const submissionOptions = { includeSelection: includeSelection.value }
   if (props.conversationWorking) {
     // 对话工作中，添加到队列
-    emit('queueMessage', content.value)
+    emit('queueMessage', content.value, submissionOptions)
   } else {
     // 对话未工作，直接发送
-    emit('submit', content.value)
+    emit('submit', content.value, submissionOptions)
   }
+
+  includeSelection.value = false
 
   // 清空输入框
   content.value = ''
@@ -701,6 +765,32 @@ function handleAddFiles(files: FileList) {
 function handleRemoveAttachment(id: string) {
   emit('removeAttachment', id)
 }
+
+function handleToggleSelection() {
+  if (!props.hasSelection) {
+    return
+  }
+  includeSelection.value = !includeSelection.value
+}
+
+watch(() => props.hasSelection, (available) => {
+  if (!available) {
+    includeSelection.value = false
+  }
+})
+
+watch(() => props.selectionIncludeSignal, (newVal, oldVal) => {
+  if (
+    typeof newVal === 'number' &&
+    typeof oldVal === 'number' &&
+    newVal > oldVal
+  ) {
+    includeSelection.value = true
+    nextTick(() => {
+      textareaRef.value?.focus()
+    })
+  }
+})
 
 // 监听光标位置变化（仅在下拉菜单已打开时更新位置，避免重复触发请求）
 function handleSelectionChange() {
@@ -852,6 +942,70 @@ defineExpose({
   color: var(--vscode-foreground);
   opacity: 1;
   max-width: 140px;
+}
+
+.selection-preview {
+  margin: 6px 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--vscode-panel-border);
+  background: color-mix(in srgb, var(--vscode-editor-background) 70%, transparent);
+  cursor: default;
+}
+
+.selection-preview__header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--vscode-textLink-foreground);
+}
+
+.selection-preview__label {
+  flex: 1;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.selection-preview__meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 4px 0;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+  word-break: break-all;
+}
+
+.selection-preview__path {
+  font-family: var(--vscode-editor-font-family, monospace);
+}
+
+.selection-preview__line {
+  font-size: 11px;
+  opacity: 0.8;
+}
+
+.selection-preview__close {
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  padding: 0;
+}
+
+.selection-preview__snippet {
+  margin: 6px 0 0;
+  padding: 8px;
+  background: color-mix(in srgb, var(--vscode-editor-background) 40%, transparent);
+  border-radius: 4px;
+  font-size: 12px;
+  max-height: 160px;
+  overflow: auto;
+  white-space: pre-wrap;
+  line-height: 1.4;
 }
 
 .attachment-size {

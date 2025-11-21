@@ -369,6 +369,7 @@ export interface SelectionRange {
     startColumn?: number;
     endColumn?: number;
     selectedText: string;
+    autoInclude?: boolean;
 }
 
 export interface GetCurrentSelectionRequest {
@@ -536,10 +537,7 @@ export interface InsertAtMentionRequest {
  */
 export interface SelectionChangedRequest {
     type: "selection_changed";
-    selection: {
-        start: { line: number; character: number };
-        end: { line: number; character: number };
-    };
+    selection: SelectionRange | null;
 }
 
 /**

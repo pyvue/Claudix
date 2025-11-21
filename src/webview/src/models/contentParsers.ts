@@ -195,12 +195,16 @@ function parseSelection(text: string): SelectionBlock | undefined {
         ? `${fileName}#${startLine}`
         : fileName;
 
+  const snippetMatch = text.match(/from [^:]+:\s*([\s\S]*?)\n+\s*This may or may not be related/);
+  const selectedText = snippetMatch ? snippetMatch[1].replace(/\s*$/, '') : undefined;
+
   return {
     type: 'selection',
     filePath,
     label,
     startLine,
     endLine,
+    selectedText,
   };
 }
 
